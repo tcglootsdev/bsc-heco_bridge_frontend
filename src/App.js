@@ -11,12 +11,14 @@ import { Web3 } from "web3";
 
 //ABI
 import bridgeAbi from "./bscBridgeContractABI.json";
+import bscTokenAbi from "./bscTokenContractABI.json";
 function App() {
   const [bscTokenContract, setBscTokenContract] = useState(null);
   const [bscBridgeContract, setBscBridgeContract] = useState(null);
 
   const [hecoTokenContract, setHecoTokenContract] = useState(null);
   const [hecoBridgeContract, setHecoBridgeContract] = useState(null);
+  const [amount, setAmount] = useState("200");
 
   const account = useRef(null);
 
@@ -37,36 +39,29 @@ function App() {
       });
   }, [sdk]);
 
+  async function convertTokenToWei(tokenContract, amount) {
+    try {
+      // Get the number of decimals for the token
+      const decimals = await tokenContract.methods.decimals().call();
+      console.log(`Token Decimals: ${decimals}`);
+      
+      // Convert the amount to Wei
+      const amountInWei = web3.utils.toNumber(amount).mul(web3.utils.toNumber(10).pow(web3.utils.toNumber(decimals)));
+      console.log(`Amount in Wei: ${amountInWei.toString()}`);
+      
+      return amountInWei;
+    } catch (error) {
+      console.error('Error converting token to Wei:', error.message);
+    }
+  }
+  
+
   useEffect(() => {
     if (web3) {
       const bscContractAddress = "0x380694e9884E0Ad07b45a44Ed8F8920a5609fBE5";
-      const bscContractABI = [
-        {
-          constant: false,
-          inputs: [
-            {
-              name: "_spender",
-              type: "address",
-            },
-            {
-              name: "_value",
-              type: "uint256",
-            },
-          ],
-          name: "approve",
-          outputs: [
-            {
-              name: "success",
-              type: "bool",
-            },
-          ],
-          payable: false,
-          stateMutability: "nonpayable",
-          type: "function",
-        },
-      ];
+     
       const bscTokenContractInstatnce = new web3.eth.Contract(
-        bscContractABI,
+        bscTokenAbi,
         bscContractAddress
       );
       setBscTokenContract(bscTokenContractInstatnce);
@@ -91,16 +86,35 @@ function App() {
     // Assuming amount is the number of tokens you want to approve
     console.log(spender)
     try {
-      await bscTokenContract?.methods
-        .approve(spender, "100000000000000000000")
+
+      const chainId = await window.ethereum.request({ method: 'eth_chainId' });
+      const bscChainId = '0x61'; // Hexadecimal for 128, the chain ID for HECO mainnet
+
+      if (chainId !== bscChainId) {
+        // Request to switch to HECO mainnet
+        await window.ethereum.request({
+          method: 'wallet_switchEthereumChain',
+          params: [{ chainId: bscChainId }],
+        });
+      }
+
+      let remaining = await bscTokenContract?.methods.allowance(account.current, spender).call();
+      remaining = web3.utils.fromWei(remaining, 'ether');
+     
+      if(remaining < amount) {
+        await bscTokenContract?.methods
+        .approve(spender, web3.utils.toWei(amount, 'ether'))
         .send({ from: account.current });
-      console.log("Approval successful");
+        console.log("Approval successful");
+      }
+
+      // await convertTokenToWei(bscTokenContract, amount);
+
       await bscBridgeContract?.methods
-        .addLiquidity("100000000000000000000")
+        .addLiquidity(web3.utils.toWei(amount, 'ether'))
         .send({ from: account.current });
       console.log("add successfully");
      
-      const chainId = await window.ethereum.request({ method: 'eth_chainId' });
       const hecoChainId = '0xa869'; // Hexadecimal for 128, the chain ID for HECO mainnet
 
       if (chainId !== hecoChainId) {
@@ -110,11 +124,6 @@ function App() {
           params: [{ chainId: hecoChainId }],
         });
       }
-
-      // const hecoTokenContractInstatnce = new web3.eth.Contract(
-      //   bscContractABI,
-      //   bscContractAddress
-      // );
 
       const hecoBridgeContractInstatnce = new web3.eth.Contract(
         bridgeAbi,
